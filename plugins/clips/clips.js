@@ -13,6 +13,8 @@
   const {
     faArrowDown,
     faArrowUp,
+    faExpand,
+    faCompress,
     faPlay,
     faPlayCircle,
     faVolumeMute,
@@ -497,12 +499,29 @@
     const [muted, setMuted] = React.useState(!defaultClipsSettings.unmuteOnEnter);
     const [paused, setPaused] = React.useState(false);
     const [videoFailed, setVideoFailed] = React.useState(false);
+    const [isCoverMode, setIsCoverMode] = React.useState(false);
+    const [scale, setScale] = React.useState(1);
+    const [panOffset, setPanOffset] = React.useState({ x: 0, y: 0 });
+
     const touchStartY = React.useRef(null);
+    const touchStartPos = React.useRef(null);
+    const pinchStartDist = React.useRef(null);
+    const pinchStartScale = React.useRef(1);
+    const panStartPos = React.useRef(null);
+    const panStartOffset = React.useRef({ x: 0, y: 0 });
+    const wasPinching = React.useRef(false);
+
     const wheelLock = React.useRef(false);
     const loadingRef = React.useRef(false);
     const videoRef = React.useRef(null);
+    const stageRef = React.useRef(null);
 
     const current = history[index] || null;
+
+    const resetTransform = React.useCallback(() => {
+      setScale(1);
+      setPanOffset({ x: 0, y: 0 });
+    }, []);
 
     React.useEffect(() => {
       let canceled = false;
@@ -524,6 +543,8 @@
       if (loadingRef.current) {
         return;
       }
+
+      resetTransform();
 
       if (index >= 0 && index < history.length - 1) {
         setIndex((value) => value + 1);
@@ -558,11 +579,12 @@
           loadingRef.current = false;
           setLoading(false);
         });
-    }, [clipsSettings.historyExclusionWindow, clipsSettings.recommendationSource, current, history, index]);
+    }, [clipsSettings.historyExclusionWindow, clipsSettings.recommendationSource, current, history, index, resetTransform]);
 
     const loadPrevious = React.useCallback(() => {
+      resetTransform();
       setIndex((value) => Math.max(0, value - 1));
-    }, []);
+    }, [resetTransform]);
 
     React.useEffect(() => {
       if (index === -1 && !history.length) {
@@ -611,6 +633,26 @@
       }
     }
 
+    function toggleCoverMode() {
+      setIsCoverMode((value) => !value);
+      resetTransform();
+    }
+
+    const clampOffset = React.useCallback((x, y, s) => {
+      if (!stageRef.current || s <= 1) {
+        return { x: 0, y: 0 };
+      }
+
+      const rect = stageRef.current.getBoundingClientRect();
+      const maxPanX = (rect.width * (s - 1)) / 2;
+      const maxPanY = (rect.height * (s - 1)) / 2;
+
+      return {
+        x: Math.max(-maxPanX, Math.min(maxPanX, x)),
+        y: Math.max(-maxPanY, Math.min(maxPanY, y)),
+      };
+    }, []);
+
     const onWheel = React.useCallback(
       (event) => {
         event.preventDefault();
@@ -634,29 +676,67 @@
     );
 
     const onTouchStart = React.useCallback((event) => {
-      touchStartY.current = event.touches[0].clientY;
-    }, []);
+      if (event.touches.length === 2) {
+        wasPinching.current = true;
+        const dx = event.touches[0].clientX - event.touches[1].clientX;
+        const dy = event.touches[0].clientY - event.touches[1].clientY;
+        pinchStartDist.current = Math.hypot(dx, dy);
+        pinchStartScale.current = scale;
+      } else if (event.touches.length === 1) {
+        touchStartY.current = event.touches[0].clientY;
+        touchStartPos.current = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+        panStartPos.current = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+        panStartOffset.current = { ...panOffset };
+      }
+    }, [panOffset, scale]);
+
+    const onTouchMove = React.useCallback((event) => {
+      if (event.touches.length === 2 && pinchStartDist.current) {
+        const dx = event.touches[0].clientX - event.touches[1].clientX;
+        const dy = event.touches[0].clientY - event.touches[1].clientY;
+        const dist = Math.hypot(dx, dy);
+        const newScale = Math.max(1, Math.min(5, (dist / pinchStartDist.current) * pinchStartScale.current));
+        setScale(newScale);
+        setPanOffset((prev) => clampOffset(prev.x, prev.y, newScale));
+      } else if (event.touches.length === 1 && scale > 1.05 && panStartPos.current) {
+        const dx = event.touches[0].clientX - panStartPos.current.x;
+        const dy = event.touches[0].clientY - panStartPos.current.y;
+        const newX = panStartOffset.current.x + dx;
+        const newY = panStartOffset.current.y + dy;
+        setPanOffset(clampOffset(newX, newY, scale));
+      }
+    }, [clampOffset, scale]);
 
     const onTouchEnd = React.useCallback(
       (event) => {
-        if (touchStartY.current === null) {
-          return;
+        if (event.touches.length < 2) {
+          pinchStartDist.current = null;
         }
 
-        const delta = touchStartY.current - event.changedTouches[0].clientY;
-        touchStartY.current = null;
+        if (event.touches.length === 0) {
+          if (wasPinching.current) {
+            wasPinching.current = false;
+            touchStartY.current = null;
+            panStartPos.current = null;
+            return;
+          }
 
-        if (Math.abs(delta) < swipeThreshold) {
-          return;
-        }
+          if (scale <= 1.05 && touchStartY.current !== null && event.changedTouches.length > 0) {
+            const deltaY = touchStartY.current - event.changedTouches[0].clientY;
+            touchStartY.current = null;
+            panStartPos.current = null;
 
-        if (delta > 0) {
-          loadNext();
-        } else {
-          loadPrevious();
+            if (Math.abs(deltaY) >= swipeThreshold) {
+              if (deltaY > 0) {
+                loadNext();
+              } else {
+                loadPrevious();
+              }
+            }
+          }
         }
       },
-      [loadNext, loadPrevious]
+      [loadNext, loadPrevious, scale]
     );
 
     const meta = current
@@ -675,22 +755,28 @@
         ? formatScore(current.clipsRecommendation.score)
         : "";
 
+    const videoStyle = {
+      transform: `scale(${scale}) translate(${panOffset.x / scale}px, ${panOffset.y / scale}px)`,
+    };
+
     return React.createElement(
       "div",
       {
         className: "clips-feed-shell",
         onWheel,
         onTouchStart,
+        onTouchMove,
         onTouchEnd,
       },
       React.createElement(
         "div",
-        { className: "clips-feed-stage" },
+        { className: "clips-feed-stage", ref: stageRef },
         current &&
           !videoFailed &&
           React.createElement("video", {
             ref: videoRef,
-            className: "clips-feed-video",
+            className: `clips-feed-video ${isCoverMode ? "mode-cover" : ""}`,
+            style: videoStyle,
             src: absolutizePath(current.stream),
             poster: fallbackImage,
             autoPlay: true,
@@ -714,7 +800,8 @@
           videoFailed &&
           fallbackImage &&
           React.createElement("img", {
-            className: "clips-feed-video",
+            className: `clips-feed-video ${isCoverMode ? "mode-cover" : ""}`,
+            style: videoStyle,
             src: fallbackImage,
             alt: "",
           }),
@@ -741,6 +828,18 @@
               ),
             React.createElement("p", { className: "clips-feed-meta" }, meta)
           ),
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "clips-feed-fit-toggle",
+            title: isCoverMode ? "Fit to screen" : "Fill screen",
+            onClick: toggleCoverMode,
+          },
+          React.createElement(api.components.Icon, {
+            icon: isCoverMode ? faCompress : faExpand,
+          })
+        ),
         React.createElement(
           "div",
           { className: "clips-feed-actions" },
