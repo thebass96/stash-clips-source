@@ -23,7 +23,13 @@
   background: #000;
   height: 100%;
   object-fit: contain;
+  transition: transform 0.15s ease-out;
   width: 100%;
+  will-change: transform;
+}
+
+.clips-feed-video.mode-cover {
+  object-fit: cover;
 }
 
 .clips-feed-overlay {
@@ -133,6 +139,26 @@
   cursor: not-allowed;
 }
 
+.clips-feed-fit-toggle {
+  align-items: center;
+  backdrop-filter: blur(12px);
+  background: rgba(20, 20, 20, 0.64);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  bottom: 18px;
+  color: #fff;
+  display: flex;
+  font-size: 1.1rem;
+  height: 42px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  position: absolute;
+  right: 18px;
+  width: 42px;
+  z-index: 4;
+}
+
 .clips-settings-source {
   min-width: 16rem;
   width: 16rem;
@@ -191,5 +217,10 @@
   .clips-feed-action {
     height: 42px;
     width: 42px;
+  }
+
+  .clips-feed-fit-toggle {
+    bottom: 14px;
+    right: 14px;
   }
 }
